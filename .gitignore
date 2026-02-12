@@ -1,0 +1,4 @@
+notebooks/test.ipynb
+data/raw/original/*
+data/raw/extracted/*
+src/__pycache__/*
