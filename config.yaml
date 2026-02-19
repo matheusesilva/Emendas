@@ -8,7 +8,71 @@ pipelines:
   emendas_parlamentares:
     url: "https://dadosabertos-download.cgu.gov.br/PortalDaTransparencia/saida/emendas-parlamentares/EmendasParlamentares.zip"
     file_name: "EmendasParlamentares.zip"
-    options:
-      sep: ";"
-      encoding: "iso-8859-1"
-      inferSchema: true
+    expected_tables:
+      emendasparlamentares:
+        file_pattern: "EmendasParlamentares.csv"
+        sep: ";"
+        encoding: "iso-8859-1"
+        schema:
+          - {name: "Código da Emenda", type: "string", nullable: true}
+          - {name: "Ano da Emenda", type: "integer", nullable: true}
+          - {name: "Tipo de Emenda", type: "string", nullable: true}
+          - {name: "Código do Autor da Emenda", type: "string", nullable: true}
+          - {name: "Nome do Autor da Emenda", type: "string", nullable: true}
+          - {name: "Número da emenda", type: "string", nullable: true}
+          - {name: "Localidade de aplicação do recurso", type: "string", nullable: true}
+          - {name: "Código Município IBGE", type: "string", nullable: true}
+          - {name: "Município", type: "string", nullable: true}
+          - {name: "Código UF IBGE", type: "integer", nullable: true}
+          - {name: "UF", type: "string", nullable: true}
+          - {name: "Região", type: "string", nullable: true}
+          - {name: "Código Função", type: "string", nullable: true}
+          - {name: "Nome Função", type: "string", nullable: true}
+          - {name: "Código Subfunção", type: "string", nullable: true}
+          - {name: "Nome Subfunção", type: "string", nullable: true}
+          - {name: "Código Programa", type: "string", nullable: true}
+          - {name: "Nome Programa", type: "string", nullable: true}
+          - {name: "Código Ação", type: "string", nullable: true}
+          - {name: "Nome Ação", type: "string", nullable: true}
+          - {name: "Código Plano Orçamentário", type: "string", nullable: true}
+          - {name: "Nome Plano Orçamentário", type: "string", nullable: true}
+          - {name: "Valor Empenhado", type: "string", nullable: true}
+          - {name: "Valor Liquidado", type: "string", nullable: true}
+          - {name: "Valor Pago", type: "string", nullable: true}
+          - {name: "Valor Restos A Pagar Inscritos", type: "string", nullable: true}
+          - {name: "Valor Restos A Pagar Cancelados", type: "string", nullable: true}
+          - {name: "Valor Restos A Pagar Pagos", type: "string", nullable: true}
+      emendasparlamentares_convenios:
+        file_pattern: "EmendasParlamentares_Convenios.csv"
+        sep: ";"
+        encoding: "iso-8859-1"
+        schema:
+          - {name: "Código Função", type: "integer", nullable: true}
+          - {name: "Nome Função", type: "string", nullable: true}
+          - {name: "Código Subfunção", type: "integer", nullable: true}
+          - {name: "Nome Subfunção", type: "string", nullable: true}
+          - {name: "Localidade do gasto", type: "string", nullable: true}
+          - {name: "Tipo de Emenda", type: "string", nullable: true}
+          - {name: "Data Publicação Convênio", type: "string", nullable: true}
+          - {name: "Convenente", type: "string", nullable: true}
+          - {name: "Objeto Convênio", type: "string", nullable: true}
+          - {name: "Número Convênio", type: "string", nullable: true}
+          - {name: "Valor Convênio", type: "string", nullable: true}
+      emendasparlamentares_porfavorecido:
+        file_pattern: "EmendasParlamentares_PorFavorecido.csv"
+        sep: ";"
+        encoding: "iso-8859-1"
+        schema:
+          - {name: "Código da Emenda", type: "string", nullable: true}
+          - {name: "Código do Autor da Emenda", type: "string", nullable: true}
+          - {name: "Nome do Autor da Emenda", type: "string", nullable: true}
+          - {name: "Número da emenda", type: "string", nullable: true}
+          - {name: "Tipo de Emenda", type: "string", nullable: true}
+          - {name: "Ano/Mês", type: "integer", nullable: true}
+          - {name: "Código do Favorecido", type: "string", nullable: true}
+          - {name: "Favorecido", type: "string", nullable: true}
+          - {name: "Natureza Jurídica", type: "string", nullable: true}
+          - {name: "Tipo Favorecido", type: "string", nullable: true}
+          - {name: "UF Favorecido", type: "string", nullable: true}
+          - {name: "Município Favorecido", type: "string", nullable: true}
+          - {name: "Valor Recebido", type: "string", nullable: true}
