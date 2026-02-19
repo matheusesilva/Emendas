@@ -1,0 +1,14 @@
+# Configurações globais de caminhos
+storage:
+  raw_base_path: "data/00_raw"
+  bronze_base_path: "data/01_bronze"
+
+# Definição dos pipelines de ingestão
+pipelines:
+  emendas_parlamentares:
+    url: "https://dadosabertos-download.cgu.gov.br/PortalDaTransparencia/saida/emendas-parlamentares/EmendasParlamentares.zip"
+    file_name: "EmendasParlamentares.zip"
+    options:
+      sep: ";"
+      encoding: "iso-8859-1"
+      inferSchema: true
