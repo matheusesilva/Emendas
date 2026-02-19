@@ -11,6 +11,7 @@ TYPE_MAPPER = {
 }
 
 def get_logger(name):
+    """Configura e retorna um logger com o formato definido"""
     logger = logging.getLogger(name)
     if not logger.hasHandlers():
         logging.basicConfig(
@@ -20,10 +21,12 @@ def get_logger(name):
     return logger
 
 def load_config(config_path="config.yaml"):
+    """Carrega a configuração do arquivo YAML. Default é 'config.yaml' no diretório raiz."""
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
 
 def build_spark_schema(yaml_schema):
+    """Constrói um schema do Spark a partir da definição de schema no YAML."""
     fields = []
     for col in yaml_schema:
         spark_type = TYPE_MAPPER.get(col['type'].lower(), StringType())
@@ -31,6 +34,7 @@ def build_spark_schema(yaml_schema):
     return StructType(fields)
 
 def check_schema_consistency(df, expected_schema):
+    """Verifica se as colunas do DataFrame correspondem ao schema esperado. Retorna colunas faltantes e novas colunas."""
     df_columns = set(df.columns)
     expected_columns = set(field.name for field in expected_schema.fields)
     
