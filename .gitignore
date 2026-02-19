@@ -3,3 +3,7 @@ data/00_raw/*
 data/01_bronze/*
 src/ingestion/__pycache__/*
 src/__pycache__/*
+
+# Manter estrutura de pastas
+!data/00_raw/.gitkeep
+!data/01_bronze/.gitkeep
