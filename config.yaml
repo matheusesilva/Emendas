@@ -1,4 +1,4 @@
-# ----- CONFIGURAÇÕES GERAIS -----
+# --- CONFIGURAÇÕES GERAIS ---
 storage:
   raw: "data/00_raw"
   bronze: "data/01_bronze"
@@ -8,7 +8,10 @@ storage:
 logging:
   level: "INFO"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-# ------ DEFINIÇÃO DAS PIPELINES ------
+
+default_pipeline: "emendas_parlamentares"
+
+# --- DEFINIÇÃO DAS PIPELINES ---
 
 # Cada coluna possui um format responsável por padronizar os dados e aplicar as devidas transformações para garantir a qualidade dos dados
 # O format é formado por CATEGORIA_ESTILO_TAMANHO, onde:

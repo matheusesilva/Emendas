@@ -8,13 +8,16 @@ class ETLPipeline:
     def __init__(self, pipeline_name="ETL Pipeline"):
         self.spark = SparkSession.builder.appName(pipeline_name).getOrCreate()
         self.name = pipeline_name
+        self.run_config = None
 
     def run(self):
         # Inicia logger
         logger = get_logger("ETLPipeline")
 
-        # Carrega configuração
-        config = load_config()
+        # Usa config sobrescrito se presente (via main.py), senão carrega do arquivo
+        config = getattr(self, 'run_config', None)
+        if config is None:
+            config = load_config()
         if self.name not in config['pipelines']:
             logger.error(f"CONFIG    | Pipeline '{self.name}' não encontrada em config.yaml.")
             return
