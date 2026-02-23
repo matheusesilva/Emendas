@@ -2,32 +2,29 @@ from pyspark.sql import SparkSession
 from src.bronze_ingestion import run_ingestion
 from src.silver_transformation import run_transformations
 # from gold_delivery import run_delivery # Ainda não implementado
-from src.utils import get_logger, load_config
+from src.utils import Config, create_logger
 
 class ETLPipeline:
     def __init__(self, args=None):
         self.args = args
-        self.name = None
         self.config = None
         self.logger = None
         self.spark_session = None
 
     def _set_config(self):
         # Usa config via CLI se fornecida, senão carrega do arquivo YAML
-        self.config = load_config(args=self.args)
-        self.name = self.config.get('default_pipeline')
+        self.config = Config(args=self.args)
 
     def _set_logger(self):
-        self.logger = get_logger(self.name)
+        self.logger = create_logger(self.config)
 
     def _create_session(self):
-        self.spark_session = SparkSession.builder.appName(self.name).getOrCreate()
+        self.spark_session = SparkSession.builder.appName(self.config.pipeline_name).getOrCreate()
 
     def run(self):
+        """Executa o pipeline completo: Ingestão -> Transformação -> Entrega"""
         self._set_config()
-
         self._set_logger()
-
         self._create_session()
 
         # --- INGESTÃO ---

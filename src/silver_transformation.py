@@ -3,12 +3,9 @@ from typing import Any
 import unicodedata
 import time
 import os
-from datetime import datetime
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
-from src.utils import get_logger
-
-logger = get_logger("SilverTransformation")
+from src.utils import Config, Timer, create_logger, get_current_date
 
 # Agrupar colunas por tipo de transformação para evitar múltiplas passagens no DataFrame
 
@@ -40,7 +37,7 @@ def _clean_column_names(df: DataFrame, spark: SparkSession) -> DataFrame:
     new_columns = [transform_name(c) for c in df.columns]
     return df.toDF(*new_columns)
 
-def _clean_monetary_values(df: DataFrame, cols_to_clean: list, spark: SparkSession) -> DataFrame:
+def _clean_monetary_values(df: DataFrame, cols_to_clean: list, spark: SparkSession, logger: Any) -> DataFrame:
     """
     Limpa e padroniza colunas com valores monetários, removendo símbolos de moeda, 
     pontos de milhar e convertendo vírgulas decimais para pontos.
@@ -56,7 +53,7 @@ def _clean_monetary_values(df: DataFrame, cols_to_clean: list, spark: SparkSessi
     df = df.withColumn(col_name, c.cast('double'))
     return df
 
-def _capitalize_first(df: DataFrame, cols_to_transform: list, spark: SparkSession) -> DataFrame:
+def _capitalize_first(df: DataFrame, cols_to_transform: list, spark: SparkSession, logger: Any) -> DataFrame:
     """
     Aplica Maiúscula apenas no primeiro caractere da string em várias colunas.
     Ex: "RELATÓRIO DE VENDAS" -> "Relatório de vendas"
@@ -71,7 +68,7 @@ def _capitalize_first(df: DataFrame, cols_to_transform: list, spark: SparkSessio
         df = df.withColumn(col_name, transformed)
     return df
 
-def _capitalize_all(df: DataFrame, cols_to_transform: list, spark: SparkSession) -> DataFrame:
+def _capitalize_all(df: DataFrame, cols_to_transform: list, spark: SparkSession, logger: Any) -> DataFrame:
     """
     Aplica Initcap em várias colunas.
     Ex: "JOÃO SILVA" -> "João Silva"
@@ -80,7 +77,7 @@ def _capitalize_all(df: DataFrame, cols_to_transform: list, spark: SparkSession)
         df = df.withColumn(col_name, F.initcap(F.col(col_name)))
     return df
 
-def _clean_invalues(df: DataFrame, cols_to_clean: list, invalid_values: list, spark: SparkSession) -> DataFrame:
+def _clean_invalues(df: DataFrame, cols_to_clean: list, invalid_values: list, spark: SparkSession, logger: Any) -> DataFrame:
     """
     Limpa valores indesejados em colunas específicas, como "null", "n/a", "desconecido", etc.
     Substitui por null real do Spark.
@@ -94,45 +91,49 @@ def _clean_invalues(df: DataFrame, cols_to_clean: list, invalid_values: list, sp
         )
     return df
 
-def run_transformations(pipeline_name: str, config: Any, spark: SparkSession) -> None:
-
+def run_transformations(config: Config, spark: SparkSession, logger: Any) -> None:
     """Função principal para aplicar todas as transformações de limpeza e padronização."""
+    
+    # Timer para medir o tempo total do processo
+    global_timer = Timer()
 
-    p_config = config['pipelines'].get(pipeline_name)
-    storage = config['storage']
-
-    logger.info(f"TRANSFORM | Iniciando Transformações: {pipeline_name}")
-    total_start: float = time.time()
+    logger.info(f"TRANSFORM | Iniciando Transformações: {config.pipeline_name}")
 
     # Carrega tabelas da camada Bronze
-    expected_tables = p_config['expected_tables']
-    for table_name, table_config in expected_tables.items():
-        start_table: float = time.time()
-        bronze_path = os.path.join(storage['bronze'], pipeline_name, table_name)
+    p_config = getattr(config.pipelines, config.pipeline_name)
+    expected_tables = p_config.expected_tables
+
+    for table_name, table_config in vars(expected_tables).items():
+        table_timer = Timer()
+
+        bronze_path = os.path.join(
+            config.storage.bronze, 
+            config.pipeline_name, 
+            table_name
+            )
         df = spark.read.parquet(bronze_path)
 
         # 1. Limpeza de Valores Indesejados
-        invalid_values = p_config.get('invalid_values', [])
+        invalid_values = p_config.invalid_values
         if invalid_values:
             logger.info(f"TRANSFORM | Limpando valores inválidos: {invalid_values} da tabela {table_name}")
-            df = _clean_invalues(df, df.columns, invalid_values, spark)
+            df = _clean_invalues(df, df.columns, invalid_values, spark, logger)
 
         # 2. Limpeza e formatação colunas com valores monetários
-        monetary_cols = [col['name'] for col in table_config['schema'] if col['format'].startswith('NUM_BRL')]
-        print(monetary_cols)
+        monetary_cols = [col.name for col in table_config.schema if col.format.startswith('NUM_BRL')]
         if monetary_cols:
             logger.info(f"TRANSFORM | Limpando colunas monetárias: {monetary_cols} da tabela {table_name}")
-            df =  _clean_monetary_values(df, monetary_cols, spark)
+            df =  _clean_monetary_values(df, monetary_cols, spark, logger)
     
         # Salva o DataFrame transformado na camada Silver
         silver_path = os.path.join(
-            storage['silver'], 
-            pipeline_name, 
-            table_name, 
-            f"download_date={datetime.now().strftime('%Y-%m-%d')}" 
+            config.storage.silver, 
+            config.pipeline_name, 
+            table_name,
+            f"transform_date={get_current_date}" 
             )
         df.write.mode("overwrite").parquet(silver_path)
         logger.info(f"TRANSFORM | Tabela {table_name} salva na camada Silver em: {silver_path}")
 
         end_table: float = time.time()
-        logger.info(f"TRANSFORM | Tabela {table_name} transformada em {end_table - start_table:.2f} segundos")
+        logger.info(f"TRANSFORM | Tabela {table_name} transformada em {table_timer.duration():.2f} segundos")
