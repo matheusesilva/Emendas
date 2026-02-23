@@ -5,25 +5,33 @@ from src.silver_transformation import run_transformations
 from src.utils import get_logger, load_config
 
 class ETLPipeline:
-    def __init__(self, pipeline_name="ETL Pipeline"):
-        self.spark = SparkSession.builder.appName(pipeline_name).getOrCreate()
-        self.name = pipeline_name
-        self.run_config = None
+    def __init__(self, args=None):
+        self.args = args
+        self.name = None
+        self.config = None
+        self.logger = None
+        self.spark_session = None
+
+    def _set_config(self):
+        # Usa config via CLI se fornecida, senão carrega do arquivo YAML
+        self.config = load_config(args=self.args)
+        self.name = self.config.get('default_pipeline')
+
+    def _set_logger(self):
+        self.logger = get_logger(self.name)
+
+    def _create_session(self):
+        self.spark_session = SparkSession.builder.appName(self.name).getOrCreate()
 
     def run(self):
-        # Inicia logger
-        logger = get_logger("ETLPipeline")
+        self._set_config()
 
-        # Usa config sobrescrito se presente (via main.py), senão carrega do arquivo
-        config = getattr(self, 'run_config', None)
-        if config is None:
-            config = load_config()
-        if self.name not in config['pipelines']:
-            logger.error(f"CONFIG    | Pipeline '{self.name}' não encontrada em config.yaml.")
-            return
+        self._set_logger()
 
-        # 1. Ingestão
-        run_ingestion(self.name, config, self.spark)
+        self._create_session()
 
-        # 2. Transformação
-        run_transformations(self.name, config, self.spark)
+        # --- INGESTÃO ---
+        run_ingestion(self.config, self.spark_session, self.logger)
+
+        # --- TRANSFORMAÇÃO ---
+        run_transformations(self.config, self.spark_session, self.logger)
