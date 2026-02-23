@@ -16,9 +16,13 @@ def get_logger(name: str) -> logging.Logger:
     """Configura e retorna um logger com o formato definido"""
     logger = logging.getLogger(name)
     if not logger.hasHandlers():
+        log_config = load_config().get('logging', {})
+        level_str = log_config.get('level', 'INFO').upper()
+        level = getattr(logging, level_str, logging.INFO)
+        fmt = log_config.get('format', '%(asctime)s | %(levelname)-8s | %(message)s')
         logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s | %(levelname)-8s | %(message)s'
+            level=level,
+            format=fmt
         )
     return logger
 

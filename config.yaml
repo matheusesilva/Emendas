@@ -5,6 +5,9 @@ storage:
   silver: "data/02_silver"
   gold: "data/03_gold"
 
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 # ------ DEFINIÇÃO DAS PIPELINES ------
 
 # Cada coluna possui um format responsável por padronizar os dados e aplicar as devidas transformações para garantir a qualidade dos dados
