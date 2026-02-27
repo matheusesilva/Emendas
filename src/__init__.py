@@ -1,6 +1,7 @@
 from pyspark.sql import SparkSession
 from src.bronze_ingestion import get_zip, run_ingestion
 from src.silver_transformation import run_transformations
+from src.gold_delivery import run_delivery
 from src.utils import Config, get_logger
 
 class ETLPipeline:
@@ -21,6 +22,10 @@ class ETLPipeline:
             .appName(self.config.name) \
             .config("spark.sql.sources.partitionOverwriteMode", "dynamic") \
             .getOrCreate()
+    
+    def _stop_session(self):
+        if self.spark_session:
+            self.spark_session.stop()
 
     def run(self):
         """Executa o pipeline completo: Ingestão -> Transformação -> Entrega"""
@@ -36,3 +41,7 @@ class ETLPipeline:
 
         # --- TRANSFORMAÇÃO ---
         run_transformations(self.config, self.spark_session, self.logger)
+        self._stop_session()
+
+        # --- ENTREGA ---
+        run_delivery(self.config, self.logger)
