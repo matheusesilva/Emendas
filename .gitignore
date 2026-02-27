@@ -11,10 +11,11 @@ data/03_gold/*
 src/__pycache__/*
 tests/__pycache__/*
 .vscode/*
-.logs/*
+logs/*
 
 # Manter estrutura de pastas
 !data/00_raw/.gitkeep
 !data/01_bronze/.gitkeep
 !data/02_silver/.gitkeep
 !data/03_gold/.gitkeep
+!data/logs/.gitkeep
