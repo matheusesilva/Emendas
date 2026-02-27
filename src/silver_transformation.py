@@ -1,139 +1,119 @@
-import re
-from typing import Any
-import unicodedata
-import time
 import os
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql import functions as F
-from src.utils import Config, Timer, create_logger, get_current_date
+from datetime import datetime
 
-# Agrupar colunas por tipo de transformação para evitar múltiplas passagens no DataFrame
+from pyspark.sql import SparkSession, DataFrame, functions as F
 
+from src.utils import Config, get_current_date, track_execution
 
-def _clean_column_names(df: DataFrame, spark: SparkSession) -> DataFrame:
-    """
-    Limpa nomes de colunas: remove acentos, caracteres especiais, 
-    converte para snake_case e letras minúsculas.
-    """
-    def transform_name(name):
-        # Normaliza para remover acentos (NFD separa o caractere do acento)
-        name = unicodedata.normalize('NFD', name)
-        name = name.encode('ascii', 'ignore').decode('utf-8')
-        
-        # Converte para minúsculo
-        name = name.lower()
-        
-        # Substitui espaços, hífens e pontos por underscore
-        name = re.sub(r'[\s\-\.]+', '_', name)
-        
-        # Remove qualquer caractere que não seja letra (a-z), número ou underscore
-        name = re.sub(r'[^a-z0-9_]', '', name)
-        
-        # Limpeza de underscores extras (duplicados ou nas extremidades)
-        name = re.sub(r'_+', '_', name)
-        return name.strip('_')
-
-    # Renomeando todas as colunas de uma vez para melhor performance
-    new_columns = [transform_name(c) for c in df.columns]
-    return df.toDF(*new_columns)
-
-def _clean_monetary_values(df: DataFrame, cols_to_clean: list, spark: SparkSession, logger: Any) -> DataFrame:
-    """
-    Limpa e padroniza colunas com valores monetários, removendo símbolos de moeda, 
-    pontos de milhar e convertendo vírgulas decimais para pontos.
-    Ex: "R$ 1.234,56" -> "1234.56"
-    """
-    for col_name in cols_to_clean:
-        logger.info(f"TRANSFORM | Limpando coluna monetária: {col_name}")
-        c = F.col(col_name)
-        c = F.regexp_replace(c, r'[R\$\s]', '') # Remove R, $ e espaços
-        c = F.regexp_replace(c, r'\.', '')      # Remove pontos de milhar
-        c = F.regexp_replace(c, r',', '.')      # Vírgula para ponto
-        
-    df = df.withColumn(col_name, c.cast('double'))
-    return df
-
-def _capitalize_first(df: DataFrame, cols_to_transform: list, spark: SparkSession, logger: Any) -> DataFrame:
-    """
-    Aplica Maiúscula apenas no primeiro caractere da string em várias colunas.
-    Ex: "RELATÓRIO DE VENDAS" -> "Relatório de vendas"
-    """
-    for col_name in cols_to_transform:
-        col = F.col(col_name)
-        # 1ª letra em Upper + Restante da string em Lower
-        transformed = F.concat(
-            F.upper(F.substring(col, 1, 1)),
-            F.lower(F.substring(col, 2, 100000))
-        )
-        df = df.withColumn(col_name, transformed)
-    return df
-
-def _capitalize_all(df: DataFrame, cols_to_transform: list, spark: SparkSession, logger: Any) -> DataFrame:
-    """
-    Aplica Initcap em várias colunas.
-    Ex: "JOÃO SILVA" -> "João Silva"
-    """
-    for col_name in cols_to_transform:
-        df = df.withColumn(col_name, F.initcap(F.col(col_name)))
-    return df
-
-def _clean_invalues(df: DataFrame, cols_to_clean: list, invalid_values: list, spark: SparkSession, logger: Any) -> DataFrame:
-    """
-    Limpa valores indesejados em colunas específicas, como "null", "n/a", "desconecido", etc.
-    Substitui por null real do Spark.
-    """
-    invalid_values = [v.lower() for v in invalid_values]  # Padroniza para comparação case-insensitive
-
-    for col_name in cols_to_clean:
-        df = df.withColumn(
-            col_name,
-            F.when(F.lower(F.col(col_name)).isin(invalid_values), None).otherwise(F.col(col_name))
-        )
-    return df
-
-def run_transformations(config: Config, spark: SparkSession, logger: Any) -> None:
-    """Função principal para aplicar todas as transformações de limpeza e padronização."""
+@track_execution(job_name="transformation")
+def run_transformations(config: Config, spark: SparkSession, logger, context: dict = None):
+    """Função que aplica as transformações necessárias para limpar e preparar os dados, lendo da bronze e escrevendo na silver."""
     
-    # Timer para medir o tempo total do processo
-    global_timer = Timer()
+    expected_files = config.expected_files.values()  
+    print(f"Arquivos esperados para transformação: {expected_files}")
 
-    logger.info(f"TRANSFORM | Iniciando Transformações: {config.pipeline_name}")
+    for table_name in expected_files:
+        print(f"Processando transformação para a tabela: {table_name}")
+        
+        bronze_path = os.path.join(config.storage.bronze, table_name)
+        silver_path = os.path.join(config.storage.silver, table_name)
+        
+        if os.path.exists(bronze_path):
 
-    # Carrega tabelas da camada Bronze
-    p_config = getattr(config.pipelines, config.pipeline_name)
-    expected_tables = p_config.expected_tables
+            df = spark.read.parquet(bronze_path) \
+                .filter(F.col("reference_date") == config.processing_date) \
+                .transform(lambda df: _clean_invalid_values(df, config, table_name)) \
+                .transform(lambda df: _format_currency(df, config, table_name)) \
+                .transform(lambda df: _format_strings(df, config, table_name)) \
+                .withColumn("timestamp_transform", F.lit(datetime.now().isoformat()))
 
-    for table_name, table_config in vars(expected_tables).items():
-        table_timer = Timer()
-
-        bronze_path = os.path.join(
-            config.storage.bronze, 
-            config.pipeline_name, 
-            table_name
-            )
-        df = spark.read.parquet(bronze_path)
-
-        # 1. Limpeza de Valores Indesejados
-        invalid_values = p_config.invalid_values
-        if invalid_values:
-            logger.info(f"TRANSFORM | Limpando valores inválidos: {invalid_values} da tabela {table_name}")
-            df = _clean_invalues(df, df.columns, invalid_values, spark, logger)
-
-        # 2. Limpeza e formatação colunas com valores monetários
-        monetary_cols = [col.name for col in table_config.schema if col.format.startswith('NUM_BRL')]
-        if monetary_cols:
-            logger.info(f"TRANSFORM | Limpando colunas monetárias: {monetary_cols} da tabela {table_name}")
-            df =  _clean_monetary_values(df, monetary_cols, spark, logger)
+            df.write.mode("overwrite").partitionBy("reference_date").parquet(silver_path)
+            print(f"Transformação concluída para a tabela {table_name}. Dados salvos em: {silver_path}")
+        
+        else:
+            raise FileNotFoundError(f"Dados da camada bronze para a tabela {table_name} e data {config.processing_date} não encontrados. Verifique se a ingestão foi realizada com sucesso.")
+            
+def _format_currency(df: DataFrame, config: Config, table_name: str) -> DataFrame:
+    """Exemplo de transformação específica para colunas de valor monetário especificadas no YAML."""
     
-        # Salva o DataFrame transformado na camada Silver
-        silver_path = os.path.join(
-            config.storage.silver, 
-            config.pipeline_name, 
-            table_name,
-            f"transform_date={get_current_date}" 
-            )
-        df.write.mode("overwrite").parquet(silver_path)
-        logger.info(f"TRANSFORM | Tabela {table_name} salva na camada Silver em: {silver_path}")
+    monetary_cols = config.get_cols_format(table_name, "NUM_BRL")
 
-        end_table: float = time.time()
-        logger.info(f"TRANSFORM | Tabela {table_name} transformada em {table_timer.duration():.2f} segundos")
+    if monetary_cols:
+        for col in monetary_cols:
+            df = df.withColumn(col, F.regexp_replace(F.col(col), r'[^\d,.-]', '')) \
+                .withColumn(col, F.regexp_replace(F.col(col), r',', '.').cast('double'))   
+    return df
+
+def _clean_invalid_values(df: DataFrame, config: Config, table_name: str) -> DataFrame:
+    """Exemplo de função para limpar valores inválidos configurados no YAML."""
+
+    invalid_values = config.get_invalid_values(table_name)
+    cols = config.get_cols_format(table_name,"")
+
+    if invalid_values:
+        for col in cols:
+            df = df.withColumn(col, F.when(F.col(col).isin(invalid_values), None).otherwise(F.col(col)))
+    return df
+
+def _format_strings(df: DataFrame, config: Config, table_name: str) -> DataFrame:
+    """Exemplo de transformação para formatar colunas de string, como remover acentos ou converter para maiúsculas."""
+    
+    cols_initcap = config.get_cols_format(table_name, "STR_INITC") # Todas palavras com a primeira letra maiúscula
+    cols_sentcap = config.get_cols_format(table_name, "STR_SENTC") # Apenas a primeira letra da sentença em maiúscula, o restante em minúsculo
+
+    def to_initcap(df: DataFrame) -> DataFrame:
+        if cols_initcap:
+            for col in cols_initcap:
+                df = df.withColumn(col, F.initcap(F.col(col)))
+        return df
+
+    def to_sentcap(df: DataFrame) -> DataFrame:
+        if cols_sentcap:
+            for col in cols_sentcap:
+                df = df.withColumn(col, 
+                    F.concat(
+                        F.upper(F.substring(F.col(col), 1, 1)), 
+                        F.lower(F.substring(F.col(col), 2, 1000))
+                        )
+                    )
+        return df
+    
+    def handle_prepositions(df: DataFrame) -> DataFrame:
+        preps = ["a","o","as","os","em","de","do","da","dos","das","para",
+                 "por","com","e", "sem", "sobre", "entre", "até", "desde", 
+                 "contra", "à", "às", "ao", "aos", "pela", "pelo", "pelos", 
+                 "pelas"]
+        preps_sql = ",".join([f"'{p}'" for p in preps])
+        
+        for col_name in list(set(cols_sentcap + cols_initcap)):
+            # F.expr permite usar expressões SQL para manipular strings, aplicando a lógica de manter preposições em minúsculo
+            df = df.withColumn(col_name, F.expr(f"""
+                array_join(
+                    transform(
+                        split(`{col_name}`, ' '),
+                        x -> IF(array_contains(array({preps_sql}), lower(x)),
+                                lower(x),
+                                x
+                        )
+                    ),
+                    ' '
+                )
+            """))
+        
+        return df
+
+    df = df.transform(to_initcap) \
+        .transform(to_sentcap) \
+        .transform(handle_prepositions) \
+    
+    return df
+
+def formate_numbers(df: DataFrame, config: Config, table_name: str) -> DataFrame:
+    """Exemplo de transformação para formatar colunas numéricas, como remover caracteres não numéricos e converter para tipo numérico."""
+    
+    numeric_cols = config.get_cols_format(table_name, "NUM_INT")
+
+    if numeric_cols:
+        for col in numeric_cols:
+            df = df.withColumn(col, F.regexp_replace(F.col(col), r'[^\d]', '').cast('integer'))
+    return df

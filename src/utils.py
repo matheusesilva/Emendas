@@ -1,120 +1,208 @@
-import yaml
-import logging
-import time
+import uuid
 import json
+import time
+import logging
+import functools
+from pathlib import Path
 from datetime import datetime
+from typing import Dict, List
 from types import SimpleNamespace
-from typing import Dict, Set, Tuple, List, Any
-from pyspark.sql import DataFrame
+
+import yaml
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, LongType
-
-# Mapeador de tipos YAML -> PySpark
-TYPE_MAPPER: Dict[str, Any] = {
-    "string": StringType(),
-    "integer": IntegerType(),
-    "long": LongType(),
-    "double": DoubleType()
-}
-
-DEFAULT_YAML_CONFIG: str = "config.yaml"
-
-def build_spark_schema(yaml_schema: List[Dict[str, Any]]) -> StructType:
-    """Constrói um schema do Spark a partir da definição de schema no YAML."""
-    fields: List[StructField] = []
-    for col in yaml_schema:
-        spark_type = TYPE_MAPPER.get(col.type.lower(), StringType())
-        fields.append(StructField(col.name, spark_type))
-    return StructType(fields)
-
-def check_schema_consistency(df: DataFrame, expected_schema: StructType) -> Tuple[Set[str], Set[str]]:
-    """Verifica se as colunas do DataFrame correspondem ao schema esperado. Retorna colunas faltantes e novas colunas."""
-    df_columns = set(df.columns)
-    expected_columns = set(field.name for field in expected_schema.fields)
-    
-    missing_columns = expected_columns - df_columns
-    new_columns = df_columns - expected_columns
-    
-    return missing_columns, new_columns
-
-def create_logger(config: Config) -> logging.Logger:
-    """Configura e retorna um logger com o formato definido"""
-    logger = logging.getLogger(config.pipeline_name)
-    if not logger.hasHandlers():
-        level = getattr(logging, config.logging.level)
-        format = config.logging.format
-        logging.basicConfig(
-            level=level,
-            format=format
-        )
-    return logger
 
 def get_current_date() -> str:
     """Retorna a data atual no formato YYYY-MM-DD"""
     return datetime.now().strftime('%Y-%m-%d')
 
-class Timer:
-    """Context manager para medir o tempo de execução de blocos de código."""
-    def __init__(self):
-        self.__start_time: float = 0.0
-        self.__end_time: float = 0.0
-        self.start()
-
-    def start (self):
-        self.__start_time = time.time()
-    
-    def duration(self):
-        self.__end_time = time.time()
-        return self.__end_time - self.__start_time 
-    
 class Config: 
     """Classe para representar a configuração do pipeline, carregada do YAML."""
     def __init__(self, args=None):
-        self._args = args
-        self._config_file = self._get_file()
-        self._config = self._read_config()
+        self._args = self._check_args(args)
+        self._config = None
+        self._processing_date = get_current_date()
+        self._load_yaml()
         self._replace_with_args()
-        self._as_obj = self._to_obj()
+        self._to_dot_notation()
 
     def __getattr__(self, name):
-        return getattr(self._as_obj, name)
-    
-    @property
-    def config(self):
-        return self._config
-    
-    @property
-    def file(self):
-        return self._config_file
-    
-    @property
-    def pipeline_name(self):
-        return self._config.get('default_pipeline')
+            """Permite acesso direto aos atributos do config.yaml via config.url, config.storage, etc."""
+            return getattr(self._config, name)
 
-    def _to_obj(self) -> Any:
-        #Converte um dicionário aninhado em um objeto de namespace para acesso via atributo
-        return json.loads(json.dumps(self._config), object_hook=lambda x: SimpleNamespace(**x))
+    @property
+    def processing_date(self):
+        """Retorna a data de processamento, que pode ser definida via CLI ou carregada do YAML."""
+        return self._processing_date
     
-    def _get_file(self) -> str:
-        if self._args is not None and self._args.config:
-            return self._args.config
-        return DEFAULT_YAML_CONFIG
-    
-    def _read_config(self) -> Dict[str, Any]:
+
+    @property
+    def expected_files(self) -> dict:
+        """Retorna um dicionário {file_name: table_name} para os arquivos esperados na ingestão."""
+        files = {}
+        for key, content in self.content.__dict__.items():
+            files[content.file_name] = key
+        return files
+
+    def _load_yaml(self) -> bool:
+        """Carrega a configuração do arquivo YAML e converte para um namespace."""
         try:
-            with open(self._config_file, "r") as f:
-                config = yaml.safe_load(f)
-            return config
+            with open(self._args.config, 'r') as f:
+                self._config = yaml.safe_load(f)
+            return True
         except Exception as e:
-            logging.error(f"CONFIG    | Falha ao carregar {self._config_file}: {str(e)}")
-            raise Exception(f"Falha ao carregar configuração: {str(e)}")
+            raise ValueError(f"Erro ao carregar o arquivo YAML: {e}")
     
-    def _replace_with_args(self) -> Dict[str, Any]:
-        # Sobrescreve configurações com argumentos CLI, se fornecidos
-        if self._args is not None:
-            if self._args.pipeline: self._config['default_pipeline'] = self._args.pipeline
-            if self._args.raw_path: self._config['storage']['raw'] = self._args.raw_path
-            if self._args.bronze_path: self._config['storage']['bronze'] = self._args.bronze_path
-            if self._args.silver_path: self._config['storage']['silver'] = self._args.silver_path
-            if self._args.gold_path: self._config['storage']['gold'] = self._args.gold_path
-            if self._args.url: self._config['pipelines']['emendas_parlamentares']['url'] = self._args.url
-            if self._args.log_level: self._config['logging']['level'] = self._args.log_level.upper()
+    def _check_args(self, args) -> bool:
+        """Valida os argumentos fornecidos via CLI, se existirem."""
+        if args:
+            if args.log_level and args.log_level.upper() not in ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']:
+                raise ValueError(f"Nível de log inválido: {args.log_level}. Use um dos seguintes: DEBUG, INFO, WARNING, ERROR, CRITICAL.")
+            if args.date:
+                try:
+                    datetime.strptime(args.date, '%Y-%m-%d')
+                except ValueError:
+                    raise ValueError(f"Data inválida: {args.date}. Use o formato YYYY-MM-DD.")
+            if not Path(args.config).is_file():
+                raise FileNotFoundError(f"Arquivo de configuração YAML não encontrado: {args.config}")
+        return args
+
+    def _replace_with_args(self) -> bool:
+        """Substitui valores do YAML por argumentos fornecidos via CLI, se existirem."""
+        if self._args:
+            if self._args.log_level:
+                print(f"Configuração de log_level sobrescrita por argumento CLI: {self._args.log_level}")
+                self._config['logging']['level'] = self._args.log_level.upper()
+            if self._args.date:
+                print(f"Data de processamento sobrescrita por argumento CLI: {self._args.date}")
+                self._processing_date = self._args.date
+            return True
+        return False
+
+    def _to_dot_notation(self):
+        """Converte o dicionário de configuração para um namespace para acesso via dot notation."""
+        def dict_to_namespace(d):
+            if isinstance(d, dict):
+                return SimpleNamespace(**{k: dict_to_namespace(v) for k, v in d.items()})
+            elif isinstance(d, list):
+                return [dict_to_namespace(i) for i in d]
+            return d
+        self._config = dict_to_namespace(self._config)
+
+    def get_invalid_values(self, table_name: str) -> List[str]:
+        """Retorna a lista de valores inválidos para uma tabela específica, conforme definido no YAML."""
+        content = getattr(self._config, 'content', None)
+        if content and hasattr(content, table_name):
+            table = getattr(content, table_name)
+            return getattr(table, 'invalid_values', [])
+        return []
+            
+    def get_cols_format(self, table_name: str, format_substring: str) -> List[str]:
+        """Retorna uma lista de nomes de colunas que contêm a substring informada no campo 'format'."""
+        content = getattr(self._config, 'content', None)
+        column_list = []
+        
+        if content and hasattr(content, table_name):
+            table = getattr(content, table_name)
+            schema = getattr(table, 'schema', [])
+            
+            for col in schema:
+                col_name = getattr(col, 'name', None)
+                col_format = getattr(col, 'format', None)
+                
+                # Verifica se ambos existem e se a substring está contida no formato
+                if col_name and col_format:
+                    if format_substring.upper() in col_format.upper():
+                        column_list.append(col_name)
+                        
+        return column_list
+    
+    def build_spark_schema(self, table_name: str) -> StructType:
+        """Constrói um schema do Spark a partir da definição de schema no YAML."""
+        type_mapper = {
+            "string": StringType(),
+            "integer": IntegerType(),
+            "long": LongType(),
+            "double": DoubleType()
+        }
+        fields = []
+        content = getattr(self._config, 'content', None)
+        if not content or not hasattr(content, table_name):
+            raise ValueError(f"Tabela '{table_name}' não encontrada no arquivo de configuração.")
+        table = getattr(content, table_name)
+        schema = getattr(table, 'schema', [])
+        if not schema:
+            raise ValueError(f"Schema não encontrado para a tabela '{table_name}' no arquivo de configuração.")
+        for col in schema:
+            col_type = getattr(col, 'type', 'string').lower()
+            spark_type = type_mapper.get(col_type, StringType())
+            fields.append(StructField(getattr(col, 'name'), spark_type))
+        return StructType(fields)
+
+def track_execution(job_name=None):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            logger = next((arg for arg in args if hasattr(arg, 'info')), None)
+            job_id = str(uuid.uuid4())
+            start_time = time.time()
+            execution_context = {} 
+            kwargs['context'] = execution_context   
+            payload = {
+                "job_id": job_id,
+                "job_name": job_name or func.__name__,
+                "status": "started",
+                "start_at": datetime.now().isoformat()
+            }
+            try:
+                if logger: 
+                    logger.info(f"Iniciando {payload['job_name']}", extra=payload)
+                result = func(*args, **kwargs)
+                payload.update({
+                    "status": "success",
+                    "duration": round(time.time() - start_time, 4),
+                    "end_at": datetime.now().isoformat(),
+                    **execution_context
+                })
+                if logger: 
+                    logger.info(f"Sucesso em {payload['job_name']}", extra=payload)
+                return result
+            except Exception as e:
+                payload.update({
+                    "status": "error",
+                    "duration": round(time.time() - start_time, 4),
+                    "exception": str(e),
+                    **execution_context
+                })
+                if logger: logger.error(f"Erro em {payload['job_name']}", extra=payload)
+                raise
+        return wrapper
+    return decorator
+
+class JSONFormatter(logging.Formatter):
+    def format(self, record) -> str:
+        log_record = {
+            "time": datetime.fromtimestamp(record.created).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        standard_attrs = logging.LogRecord(None, None, None, None, None, None, None).__dict__.keys()
+        for key, value in record.__dict__.items():
+            if key not in standard_attrs:
+                log_record[key] = value
+        return json.dumps(log_record, ensure_ascii=False)
+
+def get_logger(config: Config) -> logging.Logger:
+    """Configura e retorna um logger com formato JSON padronizado"""
+    name = getattr(config, 'name', 'ETL_Pipeline')
+    logger = logging.getLogger(name)
+    if not logger.hasHandlers():
+        level = getattr(logging, config.logging.level.upper(), logging.INFO)
+        handler = logging.StreamHandler()
+        file_handler = logging.FileHandler(f"{config.storage.logs}/{name}.jsonl")
+        handler.setFormatter(JSONFormatter())
+        file_handler.setFormatter(JSONFormatter())
+        logger.setLevel(level)
+        logger.addHandler(handler)
+        logger.addHandler(file_handler)
+    return logger

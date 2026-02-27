@@ -1,8 +1,7 @@
 from pyspark.sql import SparkSession
-from src.bronze_ingestion import run_ingestion
+from src.bronze_ingestion import get_zip, run_ingestion
 from src.silver_transformation import run_transformations
-# from gold_delivery import run_delivery # Ainda não implementado
-from src.utils import Config, create_logger
+from src.utils import Config, get_logger
 
 class ETLPipeline:
     def __init__(self, args=None):
@@ -12,23 +11,28 @@ class ETLPipeline:
         self.spark_session = None
 
     def _set_config(self):
-        # Usa config via CLI se fornecida, senão carrega do arquivo YAML
-        self.config = Config(args=self.args)
+        self.config = Config(self.args)
 
     def _set_logger(self):
-        self.logger = create_logger(self.config)
+        self.logger = get_logger(self.config)
 
     def _create_session(self):
-        self.spark_session = SparkSession.builder.appName(self.config.pipeline_name).getOrCreate()
+        self.spark_session = SparkSession.builder \
+            .appName(self.config.name) \
+            .config("spark.sql.sources.partitionOverwriteMode", "dynamic") \
+            .getOrCreate()
 
     def run(self):
         """Executa o pipeline completo: Ingestão -> Transformação -> Entrega"""
         self._set_config()
         self._set_logger()
-        self._create_session()
+
+        # --- GET RAW DATA ---
+        zip_path = get_zip(self.config, self.logger)
 
         # --- INGESTÃO ---
-        run_ingestion(self.config, self.spark_session, self.logger)
+        self._create_session()
+        run_ingestion(self.config, self.spark_session, self.logger, zip_path)
 
         # --- TRANSFORMAÇÃO ---
         run_transformations(self.config, self.spark_session, self.logger)
