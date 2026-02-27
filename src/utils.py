@@ -45,14 +45,15 @@ class Config:
 
     def _load_yaml(self) -> bool:
         """Carrega a configuração do arquivo YAML e converte para um namespace."""
+        file = self._args.config if self._args and self._args.config else 'config.yaml'
         try:
-            with open(self._args.config, 'r') as f:
+            with open(file, 'r') as f:
                 self._config = yaml.safe_load(f)
             return True
         except Exception as e:
             raise ValueError(f"Erro ao carregar o arquivo YAML: {e}")
     
-    def _check_args(self, args) -> bool:
+    def _check_args(self, args):
         """Valida os argumentos fornecidos via CLI, se existirem."""
         if args:
             if args.log_level and args.log_level.upper() not in ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']:
@@ -115,6 +116,23 @@ class Config:
                         column_list.append(col_name)
                         
         return column_list
+
+    def get_col(self, table_name: str, col_name: str) -> Dict[str, str]:
+        """Retorna o dicionário completo de configuração de uma coluna específica."""
+        content = getattr(self._config, 'content', None)
+        
+        if content and hasattr(content, table_name):
+            table = getattr(content, table_name)
+            schema = getattr(table, 'schema', [])
+            
+            for col in schema:
+                if getattr(col, 'name', None) == col_name:
+                    return {
+                        "name": getattr(col, 'name', ''),
+                        "type": getattr(col, 'type', ''),
+                        "format": getattr(col, 'format', '')
+                    }
+        return {}
     
     def build_spark_schema(self, table_name: str) -> StructType:
         """Constrói um schema do Spark a partir da definição de schema no YAML."""
