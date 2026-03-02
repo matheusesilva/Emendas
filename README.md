@@ -41,6 +41,8 @@ O objetivo deste projeto é automatizar o download, padronização, enriquecimen
 
 ## Etapas do Pipeline ETL
 
+![Diagrama Pipeline](https://github.com/matheusesilva/Emendas/blob/a0ce036443e880adef7c3494e171bd80ab869fcc/docs/flowchart.jpg)
+
 ### 1. Ingestão (Bronze)
 - **Download do arquivo zip**: Utiliza `requests` para baixar o arquivo de emendas parlamentares do Portal da Transparência.
 - **Armazenamento do zip**: Salva o arquivo em `data/00_raw`, particionado por data (formato Hive), usando Python nativo.
@@ -61,6 +63,7 @@ O objetivo deste projeto é automatizar o download, padronização, enriquecimen
 - **Escrita dos dados gold**: Salva os dados modelados em `data/03_gold`, prontos para dashboards e relatórios.
 - **Dashboard interativo**: Utiliza `Streamlit` para criar uma aplicação web interativa, permitindo explorar e visualizar os dados gold de forma dinâmica.
 
+![Imagem Dashboard](https://github.com/matheusesilva/Emendas/blob/a0ce036443e880adef7c3494e171bd80ab869fcc/docs/dashboard_streamlit.jpg)
 
 ## Como Executar
 1. Execute o pipeline pelo `main.py` ou scripts/notebooks específicos.
