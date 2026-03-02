@@ -66,6 +66,7 @@ O objetivo deste projeto é automatizar o download, padronização, enriquecimen
 ![Imagem Dashboard](https://github.com/matheusesilva/Emendas/blob/a0ce036443e880adef7c3494e171bd80ab869fcc/docs/dashboard_streamlit.jpg)
 
 ## Como Executar
+1. Instalar as dependências do projeto.
 1. Execute o pipeline pelo `main.py` ou scripts/notebooks específicos.
 2. Execute o dashboard Streamlit em `src/` para visualizar os dados gold:
    ```bash
@@ -79,8 +80,9 @@ O objetivo deste projeto é automatizar o download, padronização, enriquecimen
    > Este comando executa o pipeline diariamente às 2h, salvando logs em `logs/cron_etl.log`. Ajuste o caminho do Python e do projeto conforme seu ambiente.
 
 ## Requisitos
-- Python 3.8+
-- PySpark
+- Python 3.10
+- PySpark 4.1.1
+- Java 17
 - DuckDB
 - Streamlit
 - requests
